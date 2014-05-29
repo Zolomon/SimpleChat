@@ -1,6 +1,7 @@
 
-package com.zolomon.simplechat.server;
+package com.zolomon.simplechat.client;
 
+import com.zolomon.simplechat.client.commands.CommandFactory;
 import com.zolomon.simplechat.server.commands.BasicCommand;
 import com.zolomon.simplechat.server.commands.Command;
 import com.zolomon.simplechat.shared.Callback;
@@ -40,6 +41,8 @@ public class ConnectionThread implements Runnable {
 
     private Callback onQuit;
 
+    private Callback onQueryName;
+
     public ConnectionThread(Socket socket, BufferedWriter serverStream, BlockingQueue<Message> queue)
             throws IOException {
         this.socket = socket;
@@ -54,37 +57,14 @@ public class ConnectionThread implements Runnable {
     }
 
     private void addCommands() {
-        commands.add(new BasicCommand("/who") {
-
-            @Override
-            public void execute() {
-                showUsers();
-            }
-
-        });
-
-        commands.add(new BasicCommand("/quit") {
-
-            @Override
-            public void execute() {
-                dispatchMessage("Server", author + " has disconnected.");
-            }
-
-            @Override
-            public boolean terminate() {
-                return true;
-            }
-
-        });
+        commands = CommandFactory.getCommands(this);
     }
 
     @Override
     public void run() {
         String msg = null;
         try {
-            write("What is your name?\n");
-
-            this.author = reader.readLine();
+            onQueryName.execute();
 
             dispatchMessage("Server", author + " has connected.");
 
@@ -113,6 +93,11 @@ public class ConnectionThread implements Runnable {
         teardown();
     }
 
+    private void showUsers() {
+        write("Connected users: ");
+        getOnShowUsersCallback().execute();
+    }
+
     public void teardown() {
         try {
             reader.close();
@@ -123,11 +108,6 @@ public class ConnectionThread implements Runnable {
         } catch (IOException e) {
 
         }
-    }
-
-    private void showUsers() {
-        writer.println("Connected users: ");
-        onShowUsersCallback.execute();
     }
 
     public void write(String msg) {
@@ -153,7 +133,7 @@ public class ConnectionThread implements Runnable {
     }
 
     public void onShowUsers(Callback callback) {
-        this.onShowUsersCallback = callback;
+        this.setOnShowUsersCallback(callback);
     }
 
     public void onQuit(Callback callback) {
@@ -162,6 +142,10 @@ public class ConnectionThread implements Runnable {
 
     public String getAuthor() {
         return author;
+    }
+
+    public void setAuthor(String userName) {
+        author = userName;
     }
 
     public void setThread(Thread t) {
@@ -178,5 +162,21 @@ public class ConnectionThread implements Runnable {
 
     public boolean isClosed() {
         return socket.isClosed();
+    }
+
+    public void onQueryName(Callback callback) {
+        onQueryName = callback;
+    }
+
+    public BufferedReader getReader() {
+        return reader;
+    }
+
+    public Callback getOnShowUsersCallback() {
+        return onShowUsersCallback;
+    }
+
+    public void setOnShowUsersCallback(Callback onShowUsersCallback) {
+        this.onShowUsersCallback = onShowUsersCallback;
     }
 }

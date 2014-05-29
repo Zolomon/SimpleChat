@@ -1,6 +1,7 @@
 
 package com.zolomon.simplechat.server;
 
+import com.zolomon.simplechat.client.ConnectionThread;
 import com.zolomon.simplechat.shared.Callback;
 import com.zolomon.simplechat.shared.Message;
 
@@ -12,6 +13,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.LinkedBlockingDeque;
 
@@ -24,6 +26,8 @@ public class Server implements Runnable {
     BlockingQueue<Message> queue;
 
     ConcurrentLinkedDeque<ConnectionThread> connections;
+
+    ConcurrentHashMap<String, ConcurrentLinkedDeque<ConnectionThread>> channels;
 
     /**
      * @param args
@@ -39,6 +43,7 @@ public class Server implements Runnable {
         connections = new ConcurrentLinkedDeque<ConnectionThread>();
         queue = new LinkedBlockingDeque<Message>();
         writer = new BufferedWriter(new OutputStreamWriter(System.out));
+        channels = new ConcurrentHashMap<String, ConcurrentLinkedDeque<ConnectionThread>>();
         try {
             server = new ServerSocket(8888);
         } catch (IOException e1) {
@@ -101,41 +106,15 @@ public class Server implements Runnable {
         });
 
         messageDispatcher.start();
-
+        System.out.println("[Message Dispatcher started]");
+        System.out.println("[Starting Connection loop]");
         while (true) {
             try {
+            	System.out.println("[Waiting for connections]");
                 Socket socket = server.accept();
-                System.out.println("New connection from: " + socket.getPort());
-                final ConnectionThread ct = new ConnectionThread(socket, writer, queue);
+                System.out.println("[New connection from: "+socket.getInetAddress().getHostAddress()+"@" + socket.getPort()+"]");
 
-                Thread thread = new Thread(ct);
-                thread.start();
-
-                ct.setThread(thread);
-                ct.onShowUsers(new Callback() {
-
-                    @Override
-                    public void execute() {
-                        for (ConnectionThread c : connections) {
-                            ct.write(new Message("Server", c.getAuthor(), System
-                                    .currentTimeMillis()));
-                        }
-                    }
-
-                });
-                ct.onQuit(new Callback() {
-
-                    @Override
-                    public void execute() {
-                        connections.remove(ct);
-                        System.out.println("REMOVED CLIENT@" + ct.getAuthor());
-                    }
-
-                });
-
-                for (ConnectionThread c : connections) {
-
-                }
+                final ConnectionThread ct = createNewConnection(socket);
 
                 connections.add(ct);
             } catch (IOException e) {
@@ -144,6 +123,65 @@ public class Server implements Runnable {
             }
         }
     }
+
+	private ConnectionThread createNewConnection(Socket socket) throws IOException {
+		final ConnectionThread ct = new ConnectionThread(socket, writer, queue);
+
+		Thread thread = new Thread(ct);
+		thread.start();
+
+		ct.setThread(thread);
+
+		ct.onShowUsers(new Callback() {
+
+		    @Override
+		    public void execute() {
+		        for (ConnectionThread c : connections) {
+		            ct.write(new Message("Server", c.getAuthor(), System
+		                    .currentTimeMillis()));
+		        }
+		    }
+
+		});
+
+		ct.onQuit(new Callback() {
+
+		    @Override
+		    public void execute() {
+		        connections.remove(ct);
+		        System.out.println("REMOVED CLIENT@" + ct.getAuthor());
+		    }
+
+		});
+
+		ct.onQueryName(new Callback() {
+
+		    @Override
+		    public void execute() {
+		        try {
+		            String userName = null;
+		            boolean isTaken = false;
+		            do {
+		                isTaken = false;
+		                ct.write("What is your name?");
+		                userName = ct.getReader().readLine();
+		                for (ConnectionThread c : connections) {
+		                    if (userName.equals(c.getAuthor())) {
+		                        isTaken = true;
+		                        ct.write("Sorry that name is taken. Please try again.");
+		                    }
+		                }
+		            } while (isTaken);
+
+		            ct.setAuthor(userName);
+
+		        } catch (IOException e) {
+		            e.printStackTrace();
+		        }
+		    }
+		});
+		return ct;
+	}
 
     private void write(Message msg) {
         try {
